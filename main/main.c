@@ -6,57 +6,6 @@
 
 #include "main.h"
 
-/* --------------------- BLE Definitions and static variables --------------------- */
-static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
-
-#define GATTS_SERVICE_UUID      0x00FF
-#define GATTS_CHAR_UUID         0xFF01
-#define GATTS_DESCR_UUID        0x3333
-#define GATTS_NUM_HANDLE        4
-
-#define DEVICE_NAME             "BlueCAN"
-#define MANUFACTURER_DATA_LEN   17
-
-#define GATTS_CHAR_VAR_LEN_MAX  0x40
-
-static uint8_t char_str[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77};
-static esp_gatt_char_prop_t property = 0;
-
-static esp_attr_value_t gatts_char_val = {
-    .attr_max_len   = GATTS_CHAR_VAR_LEN_MAX,
-    .attr_len       = sizeof(char_str),
-    .attr_value     = char_str,
-};
-
-static uint8_t adv_config_done = 0;
-
-#define adv_config_flag         (1 << 0)
-#define scan_rsp_config_flag    (1 << 1)
-
-static uint8_t adv_service_uuid128[32] = {
-    /* LSB <--------------------------------------------------------------------------------> MSB */
-    //first uuid, 16bit, [12],[13] is the value
-    0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xEE, 0x00, 0x00, 0x00,
-    //second uuid, 32bit, [12], [13], [14], [15] is the value
-    0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00,
-};
-
-static esp_ble_adv_data_t adv_data = {
-    .set_scan_rsp = false,
-    .include_name = true,
-    .include_txpower = false,
-    .min_interval = 0x0006, //slave connection min interval, Time = min_interval * 1.25 msec
-    .max_interval = 0x0010, //slave connection max interval, Time = max_interval * 1.25 msec
-    .appearance = 0x00,
-    .manufacturer_len = 0, //TEST_MANUFACTURER_DATA_LEN,
-    .p_manufacturer_data =  NULL, //&test_manufacturer[0],
-    .service_data_len = 0,
-    .p_service_data = NULL,
-    .service_uuid_len = sizeof(adv_service_uuid128),
-    .p_service_uuid = adv_service_uuid128,
-    .flag = (ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT),
-};
-
 /* --------------------- Definitions and static variables ------------------ */
 static SemaphoreHandle_t tx_task_sem;
 static SemaphoreHandle_t rx_task_sem;
@@ -95,6 +44,8 @@ uint32_t alerts =   TWAI_ALERT_TX_SUCCESS       |
                     TWAI_ALERT_ERR_PASS         |
                     TWAI_ALERT_BUS_OFF          |
                     TWAI_ALERT_RX_FIFO_OVERRUN;
+
+extern bool is_client_connected;
 
 /* --------------------------- Tasks and Functions -------------------------- */
 
@@ -172,6 +123,7 @@ static void twai_ctrl_task(void *arg) {
                 }
                 ESP_LOGI(APP_TAG, "Received data value %"PRIu32, data);
             }
+            send_can_to_client(rx_msg);
         }
 
         if (read_alert & TWAI_ALERT_ABOVE_ERR_WARN) {
@@ -238,6 +190,10 @@ static void twai_ctrl_task(void *arg) {
 
 void app_main(void) {
     ESP_LOGI(APP_TAG, "app_main() open");
+
+    ESP_LOGI(APP_TAG, "%s ble init", __func__);
+    ESP_ERROR_CHECK(ble_app_main());
+
     tx_task_sem = xSemaphoreCreateBinary();
     ctrl_task_sem = xSemaphoreCreateBinary();
     status_task_sem = xSemaphoreCreateBinary();

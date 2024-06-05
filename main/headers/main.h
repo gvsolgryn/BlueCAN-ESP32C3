@@ -45,4 +45,34 @@
 
 #define APP_TAG     "BlueCAN"
 
+/* --------------------- BLE server Definitions and static variables --------------------- */
+#define GATTS_SERVICE_UUID      0x00FF
+#define GATTS_CHAR_UUID         0xFF01
+#define GATTS_DESCR_UUID        0x3333
+#define GATTS_NUM_HANDLE        4
+
+#define DEVICE_NAME             "BlueCAN"
+#define MANUFACTURER_DATA_LEN   17
+
+#define GATTS_CHAR_VAR_LEN_MAX  0x40
+
+#define PREPARE_BUF_MAX_SIZE 1024
+
+typedef struct {
+    uint8_t                *prepare_buf;
+    int                     prepare_len;
+    uint16_t                handle;
+} prepare_type_env_t;
+
+void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
+void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
+void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param);
+void write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
+void exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
+
+esp_err_t send_can_to_client(twai_message_t msg);
+esp_err_t ble_app_main(void);
+
+/* --------------------- BLE client Definitions and static variables --------------------- */
+
 #endif
