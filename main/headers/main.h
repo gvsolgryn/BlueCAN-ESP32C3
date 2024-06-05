@@ -9,7 +9,9 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
+#include <stdbool.h>
 #include <inttypes.h>
 
 #include "freertos/FreeRTOS.h"
@@ -21,11 +23,14 @@
 #include "esp_system.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "nvs.h"
 #include "nvs_flash.h"
 #include "esp_bt.h"
 
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
+#include "esp_gattc_api.h"
+#include "esp_gatt_defs.h"
 #include "esp_bt_defs.h"
 #include "esp_bt_main.h"
 #include "esp_gatt_common_api.h"
@@ -71,8 +76,18 @@ void write_event_env(esp_gatt_if_t gatts_if, prepare_type_env_t *prepare_write_e
 void exec_write_event_env(prepare_type_env_t *prepare_write_env, esp_ble_gatts_cb_param_t *param);
 
 esp_err_t send_can_to_client(twai_message_t msg);
-esp_err_t ble_app_main(void);
+esp_err_t ble_server_app_main(void);
 
 /* --------------------- BLE client Definitions and static variables --------------------- */
+#define REMOTE_SERVICE_UUID         0x00FF
+#define REMOTE_NOTIFY_CHAR_UUID     0xFF01
+#define PROFILE_NUM                 1
+#define PROFILE_APP_ID              0
+#define INVALID_HANDLE              0
 
+void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
+void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param);
+void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_gattc_cb_param_t *param);
+
+esp_err_t ble_client_app_main(void);
 #endif

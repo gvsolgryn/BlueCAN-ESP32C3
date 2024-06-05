@@ -535,7 +535,7 @@ esp_err_t send_can_to_client(twai_message_t msg) {
     return ESP_OK;
 }
 
-esp_err_t ble_app_main(void) {
+esp_err_t ble_server_app_main(void) {
     esp_err_t ret;
 
     ret = nvs_flash_init();

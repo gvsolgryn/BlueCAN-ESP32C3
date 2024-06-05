@@ -192,7 +192,7 @@ void app_main(void) {
     ESP_LOGI(APP_TAG, "app_main() open");
 
     ESP_LOGI(APP_TAG, "%s ble init", __func__);
-    ESP_ERROR_CHECK(ble_app_main());
+    ESP_ERROR_CHECK(ble_server_app_main());
 
     tx_task_sem = xSemaphoreCreateBinary();
     ctrl_task_sem = xSemaphoreCreateBinary();
