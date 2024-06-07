@@ -100,13 +100,9 @@ static void twai_ctrl_task(void *arg) {
                 }
                 ESP_LOGI(APP_TAG, "Received data value %"PRIu32, data);
                 #if BT_MODE_SEL == SERVER_MODE
-                    if (data != 0) {
-                        send_can_to_client(rx_msg);
-                    }
+                    send_can_to_client(rx_msg);
                 #elif BT_MODE_SEL == CLIENT_MODE
-                    if (data != 0) {
-                        send_can_to_server(rx_msg);
-                    }
+                    send_can_to_server(rx_msg);
                 #endif
             }
         }
