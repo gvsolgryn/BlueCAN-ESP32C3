@@ -7,13 +7,9 @@
 #include "main.h"
 
 /* --------------------- Definitions and static variables ------------------ */
-static SemaphoreHandle_t tx_task_sem;
-static SemaphoreHandle_t rx_task_sem;
 static SemaphoreHandle_t ctrl_task_sem;
 static SemaphoreHandle_t status_task_sem;
 
-static TaskHandle_t tx_task_handle = NULL;
-static TaskHandle_t rx_task_handle = NULL;
 static TaskHandle_t ctrl_task_handle = NULL;
 static TaskHandle_t status_task_handle = NULL;
 
@@ -45,7 +41,9 @@ uint32_t alerts =   TWAI_ALERT_TX_SUCCESS       |
                     TWAI_ALERT_BUS_OFF          |
                     TWAI_ALERT_RX_FIFO_OVERRUN;
 
+#if BT_MODE_SEL == SERVER_MODE
 extern bool is_client_connected;
+#endif
 
 /* --------------------------- Tasks and Functions -------------------------- */
 
@@ -81,32 +79,11 @@ void twai_status_task(void *arg) {
     vTaskDelete(NULL);
 }
 
-static void twai_transmit_task(void *arg) {
-    xSemaphoreTake(tx_task_sem, portMAX_DELAY);
-    twai_message_t *tx_msg = (twai_message_t *)arg;
-    while (true) {
-        esp_err_t ret = twai_transmit(&test_msg, 0);
-
-        if (ret == ESP_ERR_INVALID_STATE) {
-            ESP_LOGW(APP_TAG, "Transmitted test failed - ESP_ERR_INVALID_STATE");
-            break;
-        }
-
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-
-    xSemaphoreGive(tx_task_sem);
-    vTaskDelete(NULL);
-}
-
 static void twai_ctrl_task(void *arg) {
     xSemaphoreTake(ctrl_task_sem, portMAX_DELAY);
     ESP_ERROR_CHECK(twai_start());
     ESP_LOGI(APP_TAG, "Driver started");
     ESP_LOGI(APP_TAG, "Starting transmissions");
-    xSemaphoreGive(tx_task_sem);
-
-    int error_cnt = 0;
 
     while(true) {
         uint32_t read_alert;
@@ -122,8 +99,16 @@ static void twai_ctrl_task(void *arg) {
                     data |= (rx_msg.data[i] << (i * 8));
                 }
                 ESP_LOGI(APP_TAG, "Received data value %"PRIu32, data);
+                #if BT_MODE_SEL == SERVER_MODE
+                    if (data != 0) {
+                        send_can_to_client(rx_msg);
+                    }
+                #elif BT_MODE_SEL == CLIENT_MODE
+                    if (data != 0) {
+                        send_can_to_server(rx_msg);
+                    }
+                #endif
             }
-            send_can_to_client(rx_msg);
         }
 
         if (read_alert & TWAI_ALERT_ABOVE_ERR_WARN) {
@@ -146,8 +131,7 @@ static void twai_ctrl_task(void *arg) {
 
         if (read_alert & TWAI_ALERT_BUS_OFF) {
             ESP_LOGE(APP_TAG, "Bus Off state");
-            
-            xSemaphoreTake(tx_task_sem, portMAX_DELAY);
+
             xSemaphoreTake(status_task_sem, portMAX_DELAY);
 
             for (int i = 3; i > 0; i--) {
@@ -169,13 +153,11 @@ static void twai_ctrl_task(void *arg) {
 
             ESP_ERROR_CHECK(twai_start());
             ESP_LOGI(APP_TAG, "Alert: Driver started");
-
-            xTaskCreatePinnedToCore(twai_transmit_task, "TWAI_tx", 4096, NULL, TX_TASK_PRIO, &tx_task_handle, tskNO_AFFINITY);
+            
             xTaskCreatePinnedToCore(twai_status_task, "TWAI_status", 4096, NULL, STATUS_TASK_PRIO, &status_task_handle, tskNO_AFFINITY);
             ESP_LOGI(APP_TAG, "Alert: Transmit task recreated");
             ESP_LOGI(APP_TAG, "Alert: Status task recreated");
 
-            xSemaphoreGive(tx_task_sem);
             xSemaphoreGive(status_task_sem);
         }
 
@@ -191,15 +173,18 @@ static void twai_ctrl_task(void *arg) {
 void app_main(void) {
     ESP_LOGI(APP_TAG, "app_main() open");
 
+    #if BT_MODE_SEL == SERVER_MODE
     ESP_LOGI(APP_TAG, "%s ble init", __func__);
     ESP_ERROR_CHECK(ble_server_app_main());
+    #elif BT_MODE_SEL == CLIENT_MODE
+    ESP_LOGI(APP_TAG, "%s ble init", __func__);
+    ESP_ERROR_CHECK(ble_client_app_main());
+    #endif
 
-    tx_task_sem = xSemaphoreCreateBinary();
     ctrl_task_sem = xSemaphoreCreateBinary();
     status_task_sem = xSemaphoreCreateBinary();
     ESP_LOGI(APP_TAG, "task semaphore create done");
 
-    xTaskCreatePinnedToCore(twai_transmit_task, "TWAI_tx", 4096, NULL, TX_TASK_PRIO, &tx_task_handle, tskNO_AFFINITY);
     xTaskCreatePinnedToCore(twai_ctrl_task, "TWAI_ctrl", 4096, NULL, CTRL_TASK_PRIO, &ctrl_task_handle, tskNO_AFFINITY);
     xTaskCreatePinnedToCore(twai_status_task, "TWAI_status", 4096, NULL, STATUS_TASK_PRIO, &status_task_handle, tskNO_AFFINITY);
     ESP_LOGI(APP_TAG, "task create done");
@@ -221,7 +206,6 @@ void app_main(void) {
     ESP_LOGI(APP_TAG, "Driver uninstalled");
 
     //Cleanup
-    vSemaphoreDelete(tx_task_sem);
     vSemaphoreDelete(ctrl_task_sem);
     vSemaphoreDelete(status_task_sem);
     ESP_LOGI(APP_TAG, "semaphore delete done");

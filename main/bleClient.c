@@ -1,5 +1,7 @@
 #include "main.h"
 
+#if BT_MODE_SEL == CLIENT_MODE
+
 bool connect = false;
 bool get_Server = false;
 
@@ -292,10 +294,12 @@ void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc
             }
         
             esp_log_buffer_hex(APP_TAG, p_data->notify.value, p_data->notify.value_len);
-        
+
+            rcv_can_from_server(p_data->notify.value, p_data->notify.value_len);
+
             break;
         }
-        
+
         case ESP_GATTC_WRITE_DESCR_EVT: {
             if (p_data->write.status != ESP_GATT_OK){
                 ESP_LOGE(APP_TAG, "write descr failed, error status = %x", p_data->write.status);
@@ -305,19 +309,19 @@ void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc
 
             ESP_LOGI(APP_TAG, "write descr success ");
             
-            uint8_t write_char_data[35];
+            // uint8_t write_char_data[35];
             
-            for (int i = 0; i < sizeof(write_char_data); ++i) {
-                write_char_data[i] = i % 256;
-            }
+            // for (int i = 0; i < sizeof(write_char_data); ++i) {
+            //     write_char_data[i] = i % 256;
+            // }
 
-            esp_ble_gattc_write_char(gattc_if,
-                                    gl_profile_tab[PROFILE_APP_ID].conn_id,
-                                    gl_profile_tab[PROFILE_APP_ID].char_handle,
-                                    sizeof(write_char_data),
-                                    write_char_data,
-                                    ESP_GATT_WRITE_TYPE_RSP,
-                                    ESP_GATT_AUTH_REQ_NONE);
+            // esp_ble_gattc_write_char(gattc_if,
+            //                         gl_profile_tab[PROFILE_APP_ID].conn_id,
+            //                         gl_profile_tab[PROFILE_APP_ID].char_handle,
+            //                         sizeof(write_char_data),
+            //                         write_char_data,
+            //                         ESP_GATT_WRITE_TYPE_RSP,
+            //                         ESP_GATT_AUTH_REQ_NONE);
 
             break;
         }
@@ -495,6 +499,82 @@ void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_ga
     } while (0);
 }
 
+esp_err_t send_can_to_server(twai_message_t msg) {
+    uint32_t id = msg.identifier;
+    uint8_t *data = msg.data;
+    uint8_t len = msg.data_length_code;
+
+    if (connect && gl_profile_tab[PROFILE_APP_ID].char_handle != INVALID_HANDLE) {
+        uint8_t notify_data[12] = {0};
+
+        // ID Convert
+        for (int i = 0; i < 4; i++) {
+            notify_data[i] = (id >> (8 * (3 - i))) & 0xFF;
+        }
+
+        memcpy(&notify_data[4], data, len);
+
+        esp_ble_gattc_write_char(gl_profile_tab[PROFILE_APP_ID].gattc_if,
+                                    gl_profile_tab[PROFILE_APP_ID].conn_id,
+                                    gl_profile_tab[PROFILE_APP_ID].char_handle,
+                                    sizeof(notify_data),
+                                    notify_data,
+                                    ESP_GATT_WRITE_TYPE_RSP,
+                                    ESP_GATT_AUTH_REQ_NONE);
+    } else {
+        ESP_LOGW(APP_TAG, "%s No server connected, message not sent", __func__);
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t rcv_can_from_server(uint8_t *bleData, uint16_t size) {
+    uint32_t id = 0;
+    uint8_t *twaiData = 0;
+
+    twai_message_t twai_message;
+
+    if (bleData == NULL) {
+        ESP_LOGE(APP_TAG, "bleData is NULL");
+
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    if (size < 4) {
+        ESP_LOGE(APP_TAG, "Received data size is less than expected");
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+
+    // ID Convert
+    for (int i = 0; i < 4; i++) {
+        id |= (uint32_t)bleData[i] << (8 * (3 - i));
+    }
+
+    twaiData = bleData + 4;
+
+    printf("ID : 0x%lX\t", id);
+    printf("DATA : ");
+    for (int i = 0; i < 8; i++) {
+        printf("0x%X ", twaiData[i]);
+    }
+    printf("\n");
+
+    twai_message.extd               = 1;
+    twai_message.identifier         = id;
+    twai_message.data_length_code   = size -= 4;
+    twai_message.self               = 0;
+
+    for (int i = 0; i < twai_message.data_length_code; i++) {
+        twai_message.data[i] = twaiData[i];
+    }
+
+    twai_transmit(&twai_message, 0);
+
+    return ESP_OK;
+}
+
 esp_err_t ble_client_app_main(void) {
     // Initialize NVS.
     esp_err_t ret = nvs_flash_init();
@@ -562,3 +642,5 @@ esp_err_t ble_client_app_main(void) {
 
     return ESP_OK;
 }
+
+#endif

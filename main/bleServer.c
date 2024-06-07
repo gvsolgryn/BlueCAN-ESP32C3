@@ -1,7 +1,8 @@
 #include "main.h"
 
-/* --------------------- BLE Definitions and static variables --------------------- */
+#if BT_MODE_SEL == SERVER_MODE
 
+/* --------------------- BLE Definitions and static variables --------------------- */
 uint8_t char_str[] = {0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77};
 esp_gatt_char_prop_t property = 0;
 
@@ -282,6 +283,8 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
                 ESP_LOGI(APP_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
                 esp_log_buffer_hex(APP_TAG, param->write.value, param->write.len);
 
+                rcv_can_from_client(param->write.value, param->write.len);
+
                 if (gl_profile_tab[PROFILE_APP_ID].descr_handle == param->write.handle && param->write.len == 2){
                     uint16_t descr_value = param->write.value[1]<<8 | param->write.value[0];
 
@@ -296,8 +299,9 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
                             }
 
                             //the size of notify_data[] need less than MTU size
-                            esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_APP_ID].char_handle,
-                                                    sizeof(notify_data), notify_data, false);
+                            
+                            // esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_APP_ID].char_handle,
+                            //                         sizeof(notify_data), notify_data, false);
                         }
                     } else if (descr_value == 0x0002) {
                         if (property & ESP_GATT_CHAR_PROP_BIT_INDICATE){
@@ -310,8 +314,9 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
                             }
 
                             //the size of indicate_data[] need less than MTU size
-                            esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_APP_ID].char_handle,
-                                                    sizeof(indicate_data), indicate_data, true);
+                            
+                            // esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, gl_profile_tab[PROFILE_APP_ID].char_handle,
+                            //                         sizeof(indicate_data), indicate_data, true);
                         }
                     } else if (descr_value == 0x0000){
                         ESP_LOGI(APP_TAG, "notify/indicate disable ");
@@ -322,7 +327,7 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
                 }
             }
             write_event_env(gatts_if, &prepare_write_env, param);
-            
+
             break;
         }
     
@@ -403,7 +408,7 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
         case ESP_GATTS_ADD_CHAR_DESCR_EVT: {
             gl_profile_tab[PROFILE_APP_ID].descr_handle = param->add_char_descr.attr_handle;
             ESP_LOGI(APP_TAG, "ADD_DESCR_EVT, status %d, attr_handle %d, service_handle %d",
-                     param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
+                        param->add_char_descr.status, param->add_char_descr.attr_handle, param->add_char_descr.service_handle);
             break;
         }
 
@@ -413,7 +418,7 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
 
         case ESP_GATTS_START_EVT: {
             ESP_LOGI(APP_TAG, "SERVICE_START_EVT, status %d, service_handle %d",
-                     param->start.status, param->start.service_handle);
+                        param->start.status, param->start.service_handle);
             break;
         }
 
@@ -433,9 +438,9 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
             conn_params.timeout = 400;    // timeout = 400*10ms = 4000ms
 
             ESP_LOGI(APP_TAG, "ESP_GATTS_CONNECT_EVT, conn_id %d, remote %02x:%02x:%02x:%02x:%02x:%02x:",
-                     param->connect.conn_id,
-                     param->connect.remote_bda[0], param->connect.remote_bda[1], param->connect.remote_bda[2],
-                     param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5]);
+                        param->connect.conn_id,
+                        param->connect.remote_bda[0], param->connect.remote_bda[1], param->connect.remote_bda[2],
+                        param->connect.remote_bda[3], param->connect.remote_bda[4], param->connect.remote_bda[5]);
 
             gl_profile_tab[PROFILE_APP_ID].conn_id = param->connect.conn_id;
 
@@ -457,7 +462,7 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
         }
 
         case ESP_GATTS_CONF_EVT: {
-            ESP_LOGI(APP_TAG, "ESP_GATTS_CONF_EVT, status %d attr_handle %d", param->conf.status, param->conf.handle);
+            // ESP_LOGI(APP_TAG, "ESP_GATTS_CONF_EVT, status %d attr_handle %d", param->conf.status, param->conf.handle);
 
             if (param->conf.status != ESP_GATT_OK){
                 esp_log_buffer_hex(APP_TAG, param->conf.value, param->conf.len);
@@ -478,8 +483,7 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
     }
 }
 
-void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param)
-{
+void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_if, esp_ble_gatts_cb_param_t *param) {
     /* If event is register event, store the gatts_if for each profile */
     if (event == ESP_GATTS_REG_EVT) {
         if (param->reg.status == ESP_GATT_OK) {
@@ -515,10 +519,10 @@ esp_err_t send_can_to_client(twai_message_t msg) {
     if (is_client_connected && len > 0) {
         uint8_t notify_data[12] = {0};
 
-        notify_data[0] = (id >> 24) & 0xFF;
-        notify_data[1] = (id >> 16) & 0xFF;
-        notify_data[2] = (id >> 8) & 0xFF;
-        notify_data[3] = id & 0xFF;
+        // ID Convert
+        for (int i = 0; i < 4; i++) {
+            notify_data[i] = (id >> (8 * (3 - i))) & 0xFF;
+        }
 
         memcpy(&notify_data[4], data, len);
 
@@ -531,6 +535,53 @@ esp_err_t send_can_to_client(twai_message_t msg) {
     } else {
         ESP_LOGW(APP_TAG, "%s No client connected, message not sent", __func__);
     }
+
+    return ESP_OK;
+}
+
+esp_err_t rcv_can_from_client(uint8_t *bleData, uint16_t size) {
+    uint32_t id = 0;
+    uint8_t *twaiData = 0;
+
+    twai_message_t twai_message;
+
+    if (bleData == NULL) {
+        ESP_LOGE(APP_TAG, "bleData is NULL");
+
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    if (size < 4) {
+        ESP_LOGE(APP_TAG, "Received data size is less than expected");
+
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    // ID Convert
+    for (int i = 0; i < 4; i++) {
+        id |= (uint32_t)bleData[i] << (8 * (3 - i));
+    }
+
+    twaiData = bleData + 4;
+
+    printf("ID : 0x%lX\t", id);
+    printf("DATA : ");
+    for (int i = 0; i < 8; i++) {
+        printf("0x%X ", twaiData[i]);
+    }
+    printf("\n");
+    printf("sizeof(twaiData) : %d\n", sizeof(twaiData));
+
+    twai_message.extd               = 1;
+    twai_message.identifier         = id;
+    twai_message.data_length_code   = size -= 4;
+    twai_message.self               = 0;
+
+    for (int i = 0; i < twai_message.data_length_code; i++) {
+        twai_message.data[i] = twaiData[i];
+    }
+
+    twai_transmit(&twai_message, 0);
 
     return ESP_OK;
 }
@@ -607,3 +658,5 @@ esp_err_t ble_server_app_main(void) {
 
     return ESP_OK;
 }
+
+#endif
