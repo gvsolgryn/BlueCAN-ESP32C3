@@ -12,25 +12,14 @@ static SemaphoreHandle_t status_task_sem;
 
 static TaskHandle_t ctrl_task_handle = NULL;
 static TaskHandle_t status_task_handle = NULL;
+static TaskHandle_t ble_task_handle = NULL;
+
+QueueHandle_t ble_data_queue;
 
 static const twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 static const twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS();
 //Set TX queue length to 0 due to listen only mode
 static const twai_general_config_t g_config = TWAI_GENERAL_CONFIG_DEFAULT(TX_GPIO_NUM, RX_GPIO_NUM, TWAI_MODE_NORMAL);
-
-static twai_message_t test_msg = {
-    .extd               = 1,
-    .identifier         = 0x1FFFFFFF,
-    .data_length_code   = 8,
-    .data[0]            = 0x99,
-    .data[1]            = 0x88,
-    .data[2]            = 0x77,
-    .data[3]            = 0x66,
-    .data[4]            = 0x55,
-    .data[5]            = 0x44,
-    .data[6]            = 0x33,
-    .data[7]            = 0x22,
-};
 
 uint32_t alerts =   TWAI_ALERT_TX_SUCCESS       |
                     TWAI_ALERT_RX_DATA          |
@@ -92,17 +81,17 @@ static void twai_ctrl_task(void *arg) {
 
         if (read_alert & TWAI_ALERT_RX_DATA) {
             twai_message_t rx_msg;
+            uint8_t ble_data[BLE_DATA_LEN];
             esp_err_t ret = twai_receive(&rx_msg, pdMS_TO_TICKS(1000));
             if (ret == ESP_OK) {
-                uint32_t data = 0;
-                for (int i = 0; i < rx_msg.data_length_code; i++) {
-                    data |= (rx_msg.data[i] << (i * 8));
-                }
-                ESP_LOGI(APP_TAG, "Received data value %"PRIu32, data);
                 #if BT_MODE_SEL == SERVER_MODE
                     send_can_to_client(rx_msg);
                 #elif BT_MODE_SEL == CLIENT_MODE
-                    send_can_to_server(rx_msg);
+                    // send_can_to_server(rx_msg);
+                    convert_can_to_ble(&rx_msg, ble_data);
+                    if (xQueueSend(ble_data_queue, &ble_data, portMAX_DELAY) != pdTRUE) {
+                        ESP_LOGE(APP_TAG, "Failed to send data to BLE data queue");
+                    }
                 #endif
             }
         }
@@ -166,6 +155,26 @@ static void twai_ctrl_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+void convert_can_to_ble(twai_message_t *can_data, uint8_t *ble_data) {
+
+    // uint32_t -> uint8_t 4byte
+    for (int i = 0; i < 4; i++) {
+        ble_data[i] = (can_data->identifier >> 8 * (3 - i)) & 0xFF;
+    }
+
+    memcpy(&ble_data[4], can_data->data, can_data->data_length_code);
+}
+
+void ble_send_task(void *arg) {
+    uint8_t ble_data[BLE_DATA_LEN];
+
+    while(true) {
+        if (xQueueReceive(ble_data_queue, &ble_data, portMAX_DELAY)) {
+            ble_send_data(ble_data, sizeof(ble_data));
+        }
+    }
+}
+
 void app_main(void) {
     ESP_LOGI(APP_TAG, "app_main() open");
 
@@ -179,10 +188,20 @@ void app_main(void) {
 
     ctrl_task_sem = xSemaphoreCreateBinary();
     status_task_sem = xSemaphoreCreateBinary();
+
+    ble_data_queue = xQueueCreate(BLE_QUEUE_SIZE, BLE_DATA_LEN);
+
+    if (ble_data_queue == NULL) {
+        ESP_LOGE(APP_TAG, "Failed to create queue");
+        return;
+    }
+
     ESP_LOGI(APP_TAG, "task semaphore create done");
 
     xTaskCreatePinnedToCore(twai_ctrl_task, "TWAI_ctrl", 4096, NULL, CTRL_TASK_PRIO, &ctrl_task_handle, tskNO_AFFINITY);
     xTaskCreatePinnedToCore(twai_status_task, "TWAI_status", 4096, NULL, STATUS_TASK_PRIO, &status_task_handle, tskNO_AFFINITY);
+    xTaskCreatePinnedToCore(ble_send_task, "BLE_queue", 4096, NULL, BLE_TASK_PRIO, &ble_task_handle, tskNO_AFFINITY);
+
     ESP_LOGI(APP_TAG, "task create done");
 
     //Install and start TWAI driver

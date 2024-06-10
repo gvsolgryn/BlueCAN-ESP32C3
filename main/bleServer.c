@@ -278,10 +278,10 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
         }
 
         case ESP_GATTS_WRITE_EVT: {
-            ESP_LOGI(APP_TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %" PRIu32 ", handle %d", param->write.conn_id, param->write.trans_id, param->write.handle);
+            // ESP_LOGI(APP_TAG, "GATT_WRITE_EVT, conn_id %d, trans_id %" PRIu32 ", handle %d", param->write.conn_id, param->write.trans_id, param->write.handle);
             if (!param->write.is_prep){
-                ESP_LOGI(APP_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
-                esp_log_buffer_hex(APP_TAG, param->write.value, param->write.len);
+                // ESP_LOGI(APP_TAG, "GATT_WRITE_EVT, value len %d, value :", param->write.len);
+                // esp_log_buffer_hex(APP_TAG, param->write.value, param->write.len);
 
                 rcv_can_from_client(param->write.value, param->write.len);
 
@@ -570,11 +570,10 @@ esp_err_t rcv_can_from_client(uint8_t *bleData, uint16_t size) {
         printf("0x%X ", twaiData[i]);
     }
     printf("\n");
-    printf("sizeof(twaiData) : %d\n", sizeof(twaiData));
 
     twai_message.extd               = 1;
     twai_message.identifier         = id;
-    twai_message.data_length_code   = size -= 4;
+    twai_message.data_length_code   = 8;
     twai_message.self               = 0;
 
     for (int i = 0; i < twai_message.data_length_code; i++) {
@@ -582,6 +581,7 @@ esp_err_t rcv_can_from_client(uint8_t *bleData, uint16_t size) {
     }
 
     twai_transmit(&twai_message, 0);
+    ESP_LOGI(APP_TAG, "ble -> can transmit done");
 
     return ESP_OK;
 }

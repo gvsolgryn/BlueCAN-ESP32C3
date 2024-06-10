@@ -288,12 +288,12 @@ void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc
 
         case ESP_GATTC_NOTIFY_EVT: {
             if (p_data->notify.is_notify) {
-                ESP_LOGI(APP_TAG, "ESP_GATTC_NOTIFY_EVT, receive notify value:");
+                // ESP_LOGI(APP_TAG, "ESP_GATTC_NOTIFY_EVT, receive notify value:");
             } else {
-                ESP_LOGI(APP_TAG, "ESP_GATTC_NOTIFY_EVT, receive indicate value:");
+                // ESP_LOGI(APP_TAG, "ESP_GATTC_NOTIFY_EVT, receive indicate value:");
             }
         
-            esp_log_buffer_hex(APP_TAG, p_data->notify.value, p_data->notify.value_len);
+            // esp_log_buffer_hex(APP_TAG, p_data->notify.value, p_data->notify.value_len);
 
             rcv_can_from_server(p_data->notify.value, p_data->notify.value_len);
 
@@ -563,7 +563,7 @@ esp_err_t rcv_can_from_server(uint8_t *bleData, uint16_t size) {
 
     twai_message.extd               = 1;
     twai_message.identifier         = id;
-    twai_message.data_length_code   = size -= 4;
+    twai_message.data_length_code   = 8;
     twai_message.self               = 0;
 
     for (int i = 0; i < twai_message.data_length_code; i++) {
@@ -571,6 +571,25 @@ esp_err_t rcv_can_from_server(uint8_t *bleData, uint16_t size) {
     }
 
     twai_transmit(&twai_message, 0);
+    ESP_LOGI(APP_TAG, "ble -> can transmit done");
+
+    return ESP_OK;
+}
+
+esp_err_t ble_send_data(uint8_t *ble_data, uint16_t len) {
+    esp_err_t ret = esp_ble_gattc_write_char(gl_profile_tab[PROFILE_APP_ID].gattc_if,
+                                                gl_profile_tab[PROFILE_APP_ID].conn_id,
+                                                gl_profile_tab[PROFILE_APP_ID].char_handle,
+                                                len,
+                                                ble_data,
+                                                ESP_GATT_WRITE_TYPE_RSP,
+                                                ESP_GATT_AUTH_REQ_NONE);
+
+    if (ret != ESP_OK) {
+        ESP_LOGE(APP_TAG, "Failed to send BLE data: %s", esp_err_to_name(ret));
+
+        return ret;
+    }
 
     return ESP_OK;
 }

@@ -41,10 +41,10 @@
 
 #define SERVER_MODE     0
 #define CLIENT_MODE     1
-#define BT_MODE_SEL     SERVER_MODE
+#define BT_MODE_SEL     CLIENT_MODE
 
 /* --------------------- TWAI Definitions and static variables ------------------ */
-#define RX_TASK_PRIO        3
+#define BLE_TASK_PRIO       3
 #define TX_TASK_PRIO        4
 #define CTRL_TASK_PRIO      5
 #define STATUS_TASK_PRIO    6
@@ -53,6 +53,11 @@
 #define RX_GPIO_NUM     1
 
 #define APP_TAG     "BlueCAN"
+
+#define BLE_QUEUE_SIZE  2048
+#define BLE_DATA_LEN    12
+
+void convert_can_to_ble(twai_message_t *can_data, uint8_t *ble_data);
 
 /* --------------------- BLE server Definitions and static variables --------------------- */
 #if BT_MODE_SEL == SERVER_MODE
@@ -99,6 +104,7 @@ void esp_gattc_cb(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if, esp_ble_ga
 
 esp_err_t send_can_to_server(twai_message_t msg);
 esp_err_t rcv_can_from_server(uint8_t *bleData, uint16_t size);
+esp_err_t ble_send_data(uint8_t *ble_data, uint16_t len);
 esp_err_t ble_client_app_main(void);
 #endif
 
