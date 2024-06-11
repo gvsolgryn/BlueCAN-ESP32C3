@@ -52,7 +52,13 @@
 #define TX_GPIO_NUM     0
 #define RX_GPIO_NUM     1
 
+#if BT_MODE_SEL == SERVER_MODE
+#define APP_TAG     "BlueCAN_SERVER"
+#elif BT_MODE_SEL == CLIENT_MODE
+#define APP_TAG     "BlueCAN_CLIENT"
+#else
 #define APP_TAG     "BlueCAN"
+#endif
 
 #define BLE_QUEUE_SIZE  2048
 #define BLE_DATA_LEN    12
