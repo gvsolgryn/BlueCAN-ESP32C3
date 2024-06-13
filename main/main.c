@@ -6,15 +6,12 @@
 
 #include "main.h"
 
-/* --------------------- Definitions and static variables ------------------ */
+/* --------------------- TWAI Definitions and static variables ------------------ */
 static SemaphoreHandle_t ctrl_task_sem;
 static SemaphoreHandle_t status_task_sem;
 
 static TaskHandle_t ctrl_task_handle = NULL;
 static TaskHandle_t status_task_handle = NULL;
-static TaskHandle_t ble_task_handle = NULL;
-
-QueueHandle_t ble_data_queue;
 
 static const twai_filter_config_t f_config = TWAI_FILTER_CONFIG_ACCEPT_ALL();
 static const twai_timing_config_t t_config = TWAI_TIMING_CONFIG_500KBITS();
@@ -30,11 +27,40 @@ uint32_t alerts =   TWAI_ALERT_TX_SUCCESS       |
                     TWAI_ALERT_BUS_OFF          |
                     TWAI_ALERT_RX_FIFO_OVERRUN;
 
-#if BT_MODE_SEL == SERVER_MODE
-extern bool is_client_connected;
-#endif
+/* --------------------------- TWAI Tasks and Functions -------------------------- */
+static void twai_init(void) {
+    ctrl_task_sem = xSemaphoreCreateBinary();
+    status_task_sem = xSemaphoreCreateBinary();
 
-/* --------------------------- Tasks and Functions -------------------------- */
+    ESP_LOGI(APP_TAG, "task semaphore create done");
+
+    xTaskCreatePinnedToCore(twai_ctrl_task, "TWAI_ctrl", 4096, NULL, CTRL_TASK_PRIO, &ctrl_task_handle, tskNO_AFFINITY);
+    xTaskCreatePinnedToCore(twai_status_task, "TWAI_status", 4096, NULL, STATUS_TASK_PRIO, &status_task_handle, tskNO_AFFINITY);
+
+    ESP_LOGI(APP_TAG, "task create done");
+
+    //Install and start TWAI driver
+    ESP_ERROR_CHECK(twai_driver_install(&g_config, &t_config, &f_config));
+    ESP_LOGI(APP_TAG, "Driver installed");
+
+    twai_reconfigure_alerts(alerts, NULL);
+    ESP_LOGI(APP_TAG, "alert reconfigure done");
+    
+    xSemaphoreGive(ctrl_task_sem);
+    xSemaphoreGive(status_task_sem);
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    xSemaphoreTake(ctrl_task_sem, portMAX_DELAY);
+
+    //Uninstall TWAI driver
+    ESP_ERROR_CHECK(twai_driver_uninstall());
+    ESP_LOGI(APP_TAG, "Driver uninstalled");
+
+    //Cleanup
+    vSemaphoreDelete(ctrl_task_sem);
+    vSemaphoreDelete(status_task_sem);
+    ESP_LOGI(APP_TAG, "semaphore delete done");
+}
 
 void twai_status_task(void *arg) {
     xSemaphoreTake(status_task_sem, portMAX_DELAY);
@@ -81,18 +107,9 @@ static void twai_ctrl_task(void *arg) {
 
         if (read_alert & TWAI_ALERT_RX_DATA) {
             twai_message_t rx_msg;
-            uint8_t ble_data[BLE_DATA_LEN];
             esp_err_t ret = twai_receive(&rx_msg, pdMS_TO_TICKS(1000));
             if (ret == ESP_OK) {
-                #if BT_MODE_SEL == SERVER_MODE
-                    send_can_to_client(rx_msg);
-                #elif BT_MODE_SEL == CLIENT_MODE
-                    // send_can_to_server(rx_msg);
-                    convert_can_to_ble(&rx_msg, ble_data);
-                    if (xQueueSend(ble_data_queue, &ble_data, portMAX_DELAY) != pdTRUE) {
-                        ESP_LOGE(APP_TAG, "Failed to send data to BLE data queue");
-                    }
-                #endif
+                ESP_LOGI("TEST", "RCV CAN MESSAGE");
             }
         }
 
@@ -155,75 +172,379 @@ static void twai_ctrl_task(void *arg) {
     vTaskDelete(NULL);
 }
 
-void convert_can_to_ble(twai_message_t *can_data, uint8_t *ble_data) {
+/* --------------------- ESPNOW Definitions and static variables ------------------ */
+static QueueHandle_t s_espnow_queue;
 
-    // uint32_t -> uint8_t 4byte
-    for (int i = 0; i < 4; i++) {
-        ble_data[i] = (can_data->identifier >> 8 * (3 - i)) & 0xFF;
-    }
+static uint8_t s_broadcast_mac[ESP_NOW_ETH_ALEN] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+static uint16_t s_espnow_seq[ESPNOW_DATA_MAX] = {0, 0};
 
-    memcpy(&ble_data[4], can_data->data, can_data->data_length_code);
+/* --------------------------- ESPNOW Tasks and Functions -------------------------- */
+static void wifi_init(void) {
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(ESPNOW_WIFI_MODE));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_ERROR_CHECK(esp_wifi_set_channel(CONFIG_ESPNOW_CHANNEL, WIFI_SECOND_CHAN_NONE));
+
+    #if CONFIG_ESPNOW_ENABLE_LONG_RANGE
+        ESP_ERROR_CHECK(esp_wifi_set_protocol(ESPNOW_WIFI_IF, WIFI_PROTOCOL_11B|WIFI_PROTOCOL_11G|WIFI_PROTOCOL_11N|WIFI_PROTOCOL_LR));
+    #endif
 }
 
-void ble_send_task(void *arg) {
-    uint8_t ble_data[BLE_DATA_LEN];
+static void espnow_send_cb(const uint8_t *mac_addr, esp_now_send_status_t status) {
+    espnow_event_t evt;
+    espnow_event_send_cb_t *send_cb = &evt.info.send_cb;
 
-    while(true) {
-        if (xQueueReceive(ble_data_queue, &ble_data, portMAX_DELAY)) {
-            ble_send_data(ble_data, sizeof(ble_data));
+    if (mac_addr == NULL) {
+        ESP_LOGE(APP_TAG, "%s Send cb arg error", __func__);
+
+        return;
+    }
+
+    evt.id = ESPNOW_SEND_CB;
+
+    memcpy(send_cb->mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
+
+    send_cb->status = status;
+
+    if (xQueueSend(s_espnow_queue, &evt, ESPNOW_MAXDELAY) != pdTRUE) {
+        ESP_LOGW(APP_TAG, "%s Send send queue failed", __func__);
+    }
+}
+
+static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *data, int len) {
+    espnow_event_t evt;
+    espnow_event_recv_cb_t *recv_cb = &evt.info.recv_cb;
+
+    uint8_t *mac_addr = recv_info->src_addr;
+    uint8_t *des_addr = recv_info->des_addr;
+
+    if (mac_addr == NULL || data == NULL || len <= 0) {
+        ESP_LOGD(APP_TAG, "%s Receive broadcast ESPNOW data", __func__);
+    } else {
+        ESP_LOGD(APP_TAG, "%s Receive unicast ESPNOW data", __func__);
+    }
+
+    evt.id = ESPNOW_RECV_CB;
+
+    memcpy(recv_cb->mac_addr, mac_addr, ESP_NOW_ETH_ALEN);
+
+    recv_cb->data = malloc(len);
+
+    if (recv_cb->data == NULL) {
+        ESP_LOGE(APP_TAG, "%s Malloc receive data failed", __func__);
+
+        return;
+    }
+
+    memcpy(recv_cb->data, data, len);
+
+    recv_cb->data_len = len;
+
+    if (xQueueSend(s_espnow_queue, &evt, ESPNOW_MAXDELAY) != pdTRUE) {
+        ESP_LOGW(APP_TAG, "%s Send receive queue failed", __func__);
+
+        free(recv_cb->data);
+    }
+}
+
+int espnow_data_parse(uint8_t *data, uint16_t data_len, uint8_t *state, uint16_t *seq, int *magic) {
+    espnow_data_t *buf = (espnow_data_t *)data;
+    uint16_t crc, crc_cal = 0;
+
+    if (data_len < sizeof(espnow_data_t)) {
+        ESP_LOGE(APP_TAG, "%s Receive ESPNOW data too short, len: %d", __func__, data_len);
+
+        return -1;
+    }
+
+    *state = buf->state;
+    *seq = buf->seq_num;
+    *magic = buf->magic;
+
+    crc = buf->crc;
+    buf->crc = 0;
+    crc_cal = esp_crc16_le(UINT16_MAX, (uint8_t const *)buf, data_len);
+
+    if (crc_cal == crc) {
+        return buf->type;
+    }
+
+    return -1;
+}
+
+void espnow_data_prepare(espnow_send_param_t *send_param) {
+    espnow_data_t *buf = (espnow_data_t *)send_param->buffer;
+
+    assert(send_param->len >= sizeof(espnow_data_t));
+
+    buf->type = IS_BROADCAST_ADDR(send_param->dest_mac) ? ESPNOW_DATA_BROADCAST : ESPNOW_DATA_UNICAST;
+    buf->state = send_param->state;
+    buf->seq_num = s_espnow_seq[buf->type]++;
+    buf->crc = 0;
+    buf->magic = send_param->magic;
+
+    esp_fill_random(buf->payload, send_param->len - sizeof(espnow_data_t));
+
+    buf->crc = esp_crc16_le(UINT16_MAX, (uint8_t const *)buf, send_param->len);
+}
+
+static void espnow_task(void *pvParameter) {
+    espnow_event_t evt;
+    
+    uint8_t recv_state = 0;
+    uint16_t recv_seq = 0;
+
+    int recv_magic = 0;
+    int ret = 0;
+
+    bool is_broadcast = false;
+
+    vTaskDelay(5000 / portTICK_PERIOD_MS);
+
+    ESP_LOGI(APP_TAG, "%s Start sending broadcast data", __func__);
+
+    espnow_send_param_t *send_param = (espnow_send_param_t *)pvParameter;
+
+    if (esp_now_send(send_param->dest_mac, send_param->buffer, send_param->len) != ESP_OK) {
+        ESP_LOGE(APP_TAG, "%s Send Error", __func__);
+
+        espnow_deinit(send_param);
+        vTaskDelete(NULL);
+    }
+
+    while (xQueueReceive(s_espnow_queue, &evt, portMAX_DELAY) == pdTRUE) {
+        switch (evt.id) {
+            case ESPNOW_SEND_CB: {
+                espnow_event_send_cb_t *send_cb = &evt.info.send_cb;
+
+                ESP_LOGD(APP_TAG, "%s, Send data to "MACSTR", status 1: %d", __func__, MAC2STR(send_cb->mac_addr), send_cb->status);
+
+                if (is_broadcast && (send_param->broadcast == false)) {
+                    break;
+                }
+
+                if (!is_broadcast) {
+                    send_param->count--;
+
+                    if (send_param->count == 0) {
+                        ESP_LOGI(APP_TAG, "%s Send Done", __func__);
+
+                        espnow_deinit(send_param);
+                        vTaskDelete(NULL);
+                    }
+                }
+
+                if (send_param->delay > 0) {
+                    vTaskDelay(send_param->delay / portTICK_PERIOD_MS);
+                }
+
+                ESP_LOGI(APP_TAG, "%s send data to "MACSTR"", __func__, MAC2STR(send_cb->mac_addr));
+
+                memcpy(send_param->dest_mac, send_cb->mac_addr, ESP_NOW_ETH_ALEN);
+                espnow_data_prepare(send_param);
+
+                if (esp_now_send(send_param->dest_mac, send_param->buffer, send_param->len) != ESP_OK) {
+                    ESP_LOGE(APP_TAG, "%s Send Error", __func__);
+
+                    espnow_deinit(send_param);
+                    vTaskDelete(NULL);
+                }
+
+                break;
+            }
+
+            case ESPNOW_RECV_CB: {
+                espnow_event_recv_cb_t *recv_cb = &evt.info.recv_cb;
+
+                ret = espnow_data_parse(recv_cb->data, recv_cb->data_len, &recv_state, &recv_seq, &recv_magic);
+
+                free(recv_cb->data);
+
+                if (ret == ESPNOW_DATA_BROADCAST) {
+                    ESP_LOGI(APP_TAG, "%s Receive %dth broadcast data from: "MACSTR", len: %d", __func__, recv_seq, MAC2STR(recv_cb->mac_addr), recv_cb->data_len);
+
+                    if (esp_now_is_peer_exist(recv_cb->mac_addr) == false) {
+                        esp_now_peer_info_t *peer = malloc(sizeof(esp_now_peer_info_t));
+
+                        if (peer == NULL) {
+                            ESP_LOGE(APP_TAG, "%s Malloc peer information failed", __func__);
+
+                            espnow_deinit(send_param);
+                            vTaskDelete(NULL);
+                        }
+
+                        memset(peer, 0, sizeof(esp_now_peer_info_t));
+
+                        peer->channel = CONFIG_ESPNOW_CHANNEL;
+                        peer->ifidx = ESPNOW_WIFI_IF;
+                        peer->encrypt = true;
+
+                        memcpy(peer->lmk, CONFIG_ESPNOW_LMK, ESP_NOW_KEY_LEN);
+                        memcpy(peer->peer_addr, recv_cb->mac_addr, ESP_NOW_ETH_ALEN);
+
+                        ESP_ERROR_CHECK(esp_now_add_peer(peer));
+                        
+                        free(peer);
+                    }
+
+                    if (send_param->state == 0) {
+                        send_param->state = 1;
+                    }
+
+                    if (recv_state == 1) {
+                        if (send_param->unicast == false && send_param->magic >= recv_magic) {
+                            ESP_LOGI(APP_TAG, "%s Start sending unicast data", __func__);
+                            ESP_LOGI(APP_TAG, "%s send data to "MACSTR"", __func__, MAC2STR(recv_cb->mac_addr));
+
+                            memcpy(send_param->dest_mac, recv_cb->mac_addr, ESP_NOW_ETH_ALEN);
+
+                            espnow_data_prepare(send_param);
+
+                            if (esp_now_send(send_param->dest_mac, send_param->buffer, send_param->len) != ESP_OK) {
+                                ESP_LOGE(APP_TAG, "%s Send Error", __func__);
+                                
+                                espnow_deinit(send_param);
+                                vTaskDelete(NULL);
+                            } else {
+                                send_param->broadcast = false;
+                                send_param->unicast = true;
+                            }
+                        }
+                    }
+                } else if (ret == ESPNOW_DATA_UNICAST) {
+                    ESP_LOGI(APP_TAG, "%s Receive %cth unicast data from: "MACSTR", len: %d", __func__, recv_seq, MAC2STR(recv_cb->mac_addr), recv_cb->data_len);
+
+                    send_param->broadcast = false;
+                } else {
+                    ESP_LOGI(APP_TAG, "%s Receive error data from: "MACSTR"", __func__, MAC2STR(recv_cb->mac_addr));
+                }
+
+                break;
+            }
+
+            default: {
+                break;
+            }
         }
     }
 }
 
+static esp_err_t espnow_init(void) {
+    espnow_send_param_t *send_param;
+
+    s_espnow_queue = xQueueCreate(ESPNOW_QUEUE_SIZE, sizeof(espnow_event_t));
+
+    if (s_espnow_queue == NULL) {
+        ESP_LOGE(APP_TAG, "%s Create mutex failed", __func__);
+
+        return ESP_FAIL;
+    }
+
+    ESP_ERROR_CHECK(esp_now_init());
+    ESP_ERROR_CHECK(esp_now_register_send_cb(espnow_send_cb));
+    ESP_ERROR_CHECK(esp_now_register_recv_cb(espnow_recv_cb));
+
+    #if CONFIG_ESPNOW_ENABLE_POWER_SAVE
+        ESP_ERROR_CHECK(esp_now_set_wake_window(CONFIG_ESPNOW_WAKE_WINDOW));
+        ESP_ERROR_CHECK(esp_wifi_connectionless_module_set_wake_interval(CONFIG_ESPNOW_WAKE_INTERVAL));
+    #endif
+
+    ESP_ERROR_CHECK(esp_now_set_pmk((uint8_t *)CONFIG_ESPNOW_PMK));
+
+    esp_now_peer_info_t *peer = malloc(sizeof(esp_now_peer_info_t));
+
+    if (peer == NULL) {
+        ESP_LOGE(APP_TAG, "%s Malloc peer information failed", __func__);
+
+        vSemaphoreDelete(s_espnow_queue);
+        esp_now_deinit();
+
+        return ESP_FAIL;
+    }
+
+    memset(peer, 0, sizeof(esp_now_peer_info_t));
+
+    peer->channel = CONFIG_ESPNOW_CHANNEL;
+    peer->ifidx = ESPNOW_WIFI_IF;
+    peer->encrypt = false;
+
+    memcpy(peer->peer_addr, s_broadcast_mac, ESP_NOW_ETH_ALEN);
+    ESP_ERROR_CHECK(esp_now_add_peer(peer));
+    free(peer);
+
+    send_param = malloc(sizeof(espnow_send_param_t));
+
+    if (send_param == NULL) {
+        ESP_LOGE(APP_TAG, "%s Malloc send parameter failed", __func__);
+
+        vSemaphoreDelete(s_espnow_queue);
+        esp_now_deinit();
+
+        return ESP_FAIL;
+    }
+
+    memset(send_param, 0, sizeof(espnow_send_param_t));
+
+    send_param->unicast = false;
+    send_param->broadcast = true;
+    send_param->state = 0;
+    send_param->magic = esp_random();
+    send_param->count = CONFIG_ESPNOW_SEND_COUNT;
+    send_param->delay = CONFIG_ESPNOW_SEND_DELAY;
+    send_param->len = CONFIG_ESPNOW_SEND_LEN;
+    send_param->buffer = malloc(CONFIG_ESPNOW_SEND_LEN);
+
+    if (send_param->buffer == NULL) {
+        ESP_LOGE(APP_TAG, "%s Malloc send buffer failed", __func__);
+
+        free(send_param);
+
+        vSemaphoreDelete(s_espnow_queue);
+        esp_now_deinit();
+
+        return ESP_FAIL;
+    }
+
+    memcpy(send_param->dest_mac, s_broadcast_mac, ESP_NOW_ETH_ALEN);
+    espnow_data_prepare(send_param);
+
+    xTaskCreate(espnow_task, "ESPNOW_task", 2048, send_param, ESPNOW_TASK_PRIO, NULL);
+
+    return ESP_OK;
+}
+
+static void espnow_deinit(espnow_send_param_t *send_param) {
+    free(send_param->buffer);
+    free(send_param);
+
+    vSemaphoreDelete(s_espnow_queue);
+
+    esp_now_deinit();
+}
+
+/* --------------------------- APP Start position -------------------------- */
 void app_main(void) {
     ESP_LOGI(APP_TAG, "app_main() open");
 
-    #if BT_MODE_SEL == SERVER_MODE
-    ESP_LOGI(APP_TAG, "%s ble init", __func__);
-    ESP_ERROR_CHECK(ble_server_app_main());
-    #elif BT_MODE_SEL == CLIENT_MODE
-    ESP_LOGI(APP_TAG, "%s ble init", __func__);
-    ESP_ERROR_CHECK(ble_client_app_main());
-    #endif
+    esp_err_t ret;
 
-    ctrl_task_sem = xSemaphoreCreateBinary();
-    status_task_sem = xSemaphoreCreateBinary();
+    ret = nvs_flash_init();
 
-    ble_data_queue = xQueueCreate(BLE_QUEUE_SIZE, BLE_DATA_LEN);
-
-    if (ble_data_queue == NULL) {
-        ESP_LOGE(APP_TAG, "Failed to create queue");
-        return;
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
     }
+    ESP_ERROR_CHECK(ret);
 
-    ESP_LOGI(APP_TAG, "task semaphore create done");
-
-    xTaskCreatePinnedToCore(twai_ctrl_task, "TWAI_ctrl", 4096, NULL, CTRL_TASK_PRIO, &ctrl_task_handle, tskNO_AFFINITY);
-    xTaskCreatePinnedToCore(twai_status_task, "TWAI_status", 4096, NULL, STATUS_TASK_PRIO, &status_task_handle, tskNO_AFFINITY);
-    xTaskCreatePinnedToCore(ble_send_task, "BLE_queue", 4096, NULL, BLE_TASK_PRIO, &ble_task_handle, tskNO_AFFINITY);
-
-    ESP_LOGI(APP_TAG, "task create done");
-
-    //Install and start TWAI driver
-    ESP_ERROR_CHECK(twai_driver_install(&g_config, &t_config, &f_config));
-    ESP_LOGI(APP_TAG, "Driver installed");
-
-    twai_reconfigure_alerts(alerts, NULL);
-    ESP_LOGI(APP_TAG, "alert reconfigure done");
-    
-    xSemaphoreGive(ctrl_task_sem);
-    xSemaphoreGive(status_task_sem);
-    vTaskDelay(pdMS_TO_TICKS(100));
-    xSemaphoreTake(ctrl_task_sem, portMAX_DELAY);
-
-    //Uninstall TWAI driver
-    ESP_ERROR_CHECK(twai_driver_uninstall());
-    ESP_LOGI(APP_TAG, "Driver uninstalled");
-
-    //Cleanup
-    vSemaphoreDelete(ctrl_task_sem);
-    vSemaphoreDelete(status_task_sem);
-    ESP_LOGI(APP_TAG, "semaphore delete done");
+    wifi_init();
+    espnow_init();
+    twai_init();
 
     ESP_LOGE(APP_TAG, "app_main() close");
 }

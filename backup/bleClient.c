@@ -82,6 +82,8 @@ void gattc_profile_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc
                 ESP_LOGE(APP_TAG, "config MTU error, error code = %x", mtu_ret);
             }
 
+            esp_ble_gap_set_preferred_phy(param->connect.remote_bda, ESP_BLE_GAP_NO_PREFER_RECEIVE_PHY, ESP_BLE_GAP_PHY_2M_PREF_MASK, ESP_BLE_GAP_PHY_2M_PREF_MASK, 0);
+
             break;
         }
 
@@ -658,6 +660,8 @@ esp_err_t ble_client_app_main(void) {
     if (local_mtu_ret){
         ESP_LOGE(APP_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
     }
+
+    esp_ble_gap_set_preferred_default_phy(ESP_BLE_GAP_PHY_2M_PREF_MASK, ESP_BLE_GAP_PHY_2M_PREF_MASK);
 
     return ESP_OK;
 }

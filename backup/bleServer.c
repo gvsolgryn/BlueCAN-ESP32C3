@@ -446,6 +446,7 @@ void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts
 
             //start sent the update connection parameters to the peer device.
             esp_ble_gap_update_conn_params(&conn_params);
+            esp_ble_gap_set_preferred_phy(param->connect.conn_id, ESP_BLE_GAP_NO_PREFER_TRANSMIT_PHY, ESP_BLE_GAP_PHY_2M_PREF_MASK, ESP_BLE_GAP_PHY_2M_PREF_MASK, 0);
 
             is_client_connected = true;
 
@@ -655,6 +656,8 @@ esp_err_t ble_server_app_main(void) {
     if (local_mtu_ret){
         ESP_LOGE(APP_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
     }
+
+    esp_ble_gap_set_preferred_default_phy(ESP_BLE_GAP_PHY_2M_PREF_MASK, ESP_BLE_GAP_PHY_2M_PREF_MASK);
 
     return ESP_OK;
 }
