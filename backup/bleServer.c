@@ -534,7 +534,7 @@ esp_err_t send_can_to_client(twai_message_t msg) {
                                     notify_data,
                                     false);
     } else {
-        ESP_LOGW(APP_TAG, "%s No client connected, message not sent", __func__);
+        ESP_LOGW(APP_TAG, "%s: No client connected, message not sent", __func__);
     }
 
     return ESP_OK;
@@ -604,14 +604,14 @@ esp_err_t ble_server_app_main(void) {
 
     ret = esp_bt_controller_init(&bt_cfg);
     if (ret) {
-        ESP_LOGE(APP_TAG, "%s initialize controller failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(APP_TAG, "%s: initialize controller failed: %s:", __func__, esp_err_to_name(ret));
 
         return ret;
     }
 
     ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
     if (ret) {
-        ESP_LOGE(APP_TAG, "%s enable controller failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(APP_TAG, "%s: enable controller failed: %s:", __func__, esp_err_to_name(ret));
 
         return ret;
     }
@@ -619,14 +619,14 @@ esp_err_t ble_server_app_main(void) {
     
     ret = esp_bluedroid_init_with_cfg(&bluedroid_cfg);
     if (ret) {
-        ESP_LOGE(APP_TAG, "%s init bluetooth failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(APP_TAG, "%s: init bluetooth failed: %s:", __func__, esp_err_to_name(ret));
 
         return ret;
     }
 
     ret = esp_bluedroid_enable();
     if (ret) {
-        ESP_LOGE(APP_TAG, "%s enable bluetooth failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(APP_TAG, "%s: enable bluetooth failed: %s:", __func__, esp_err_to_name(ret));
 
         return ret;
     }

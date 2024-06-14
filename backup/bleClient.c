@@ -407,7 +407,7 @@ void esp_gap_cb(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
 
                     if (adv_name != NULL) {
                         if (strlen(remote_device_name) == adv_name_len && strncmp((char *)adv_name, remote_device_name, adv_name_len) == 0) {
-                            ESP_LOGI(APP_TAG, "searched device %s", remote_device_name);
+                            ESP_LOGI(APP_TAG, "searched device %s:", remote_device_name);
                             if (connect == false) {
                                 connect = true;
                                 ESP_LOGI(APP_TAG, "connect to the remote device.");
@@ -524,7 +524,7 @@ esp_err_t send_can_to_server(twai_message_t msg) {
                                     ESP_GATT_WRITE_TYPE_RSP,
                                     ESP_GATT_AUTH_REQ_NONE);
     } else {
-        ESP_LOGW(APP_TAG, "%s No server connected, message not sent", __func__);
+        ESP_LOGW(APP_TAG, "%s: No server connected, message not sent", __func__);
     }
 
     return ESP_OK;
@@ -588,7 +588,7 @@ esp_err_t ble_send_data(uint8_t *ble_data, uint16_t len) {
                                                 ESP_GATT_AUTH_REQ_NONE);
 
     if (ret != ESP_OK) {
-        ESP_LOGE(APP_TAG, "Failed to send BLE data: %s", esp_err_to_name(ret));
+        ESP_LOGE(APP_TAG, "Failed to send BLE data: %s:", esp_err_to_name(ret));
 
         return ret;
     }
@@ -613,13 +613,13 @@ esp_err_t ble_client_app_main(void) {
 
     ret = esp_bt_controller_init(&bt_cfg);
     if (ret) {
-        ESP_LOGE(APP_TAG, "%s initialize controller failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(APP_TAG, "%s: initialize controller failed: %s:", __func__, esp_err_to_name(ret));
         return ret;
     }
 
     ret = esp_bt_controller_enable(ESP_BT_MODE_BLE);
     if (ret) {
-        ESP_LOGE(APP_TAG, "%s enable controller failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(APP_TAG, "%s: enable controller failed: %s:", __func__, esp_err_to_name(ret));
         return ret;
     }
 
@@ -627,33 +627,33 @@ esp_err_t ble_client_app_main(void) {
 
     ret = esp_bluedroid_init_with_cfg(&bluedroid_cfg);
     if (ret) {
-        ESP_LOGE(APP_TAG, "%s init bluetooth failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(APP_TAG, "%s: init bluetooth failed: %s:", __func__, esp_err_to_name(ret));
         return ret;
     }
 
     ret = esp_bluedroid_enable();
     if (ret) {
-        ESP_LOGE(APP_TAG, "%s enable bluetooth failed: %s", __func__, esp_err_to_name(ret));
+        ESP_LOGE(APP_TAG, "%s: enable bluetooth failed: %s:", __func__, esp_err_to_name(ret));
         return ret;
     }
 
     //register the  callback function to the gap module
     ret = esp_ble_gap_register_callback(esp_gap_cb);
     if (ret){
-        ESP_LOGE(APP_TAG, "%s gap register failed, error code = %x", __func__, ret);
+        ESP_LOGE(APP_TAG, "%s: gap register failed, error code = %x", __func__, ret);
         return ret;
     }
 
     //register the callback function to the gattc module
     ret = esp_ble_gattc_register_callback(esp_gattc_cb);
     if(ret){
-        ESP_LOGE(APP_TAG, "%s gattc register failed, error code = %x", __func__, ret);
+        ESP_LOGE(APP_TAG, "%s: gattc register failed, error code = %x", __func__, ret);
         return ret;
     }
 
     ret = esp_ble_gattc_app_register(PROFILE_APP_ID);
     if (ret){
-        ESP_LOGE(APP_TAG, "%s gattc app register failed, error code = %x", __func__, ret);
+        ESP_LOGE(APP_TAG, "%s: gattc app register failed, error code = %x", __func__, ret);
     }
 
     esp_err_t local_mtu_ret = esp_ble_gatt_set_local_mtu(500);

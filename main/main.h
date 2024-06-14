@@ -57,17 +57,21 @@ static void twai_ctrl_task(void *arg);
 
 #define ESPNOW_WIFI_MODE_SOFTAP     0
 #define ESPNOW_WIFI_MODE_STATION    1
-#define ESPNOW_WIFi_MODE_SEL        ESPNOW_WIFI_MODE_SOFTAP
+#define ESPNOW_WIFI_MODE_SEL        ESPNOW_WIFI_MODE_STATION
 
 /* --------------------- ESPNOW Definitions and static variables ------------------ */
 #if ESPNOW_WIFI_MODE_SEL == ESPNOW_WIFI_MODE_SOFTAP
     #define ESPNOW_WIFI_MODE    WIFI_MODE_AP
     #define ESPNOW_WIFI_IF      ESP_IF_WIFI_AP
     #define APP_TAG     "NOWCAN_AP"
+    uint8_t mac_addr[ESP_NOW_ETH_ALEN] = {0x66, 0x60, 0x35, 0x54, 0xFF, 0x01};
+    uint8_t dest_mac_addr[ESP_NOW_ETH_ALEN] = {0x66, 0x60, 0x35, 0x54, 0xFF, 0x02};
 #elif ESPNOW_WIFI_MODE_SEL == ESPNOW_WIFI_MODE_STATION
     #define ESPNOW_WIFI_MODE    WIFI_MODE_STA
     #define ESPNOW_WIFI_IF      ESP_IF_WIFI_STA
     #define APP_TAG     "NOWCAN_STA"
+    uint8_t mac_addr[ESP_NOW_ETH_ALEN] = {0x66, 0x60, 0x35, 0x54, 0xFF, 0x02};
+    uint8_t dest_mac_addr[ESP_NOW_ETH_ALEN] = {0x66, 0x60, 0x35, 0x54, 0xFF, 0x01};
 #else
     #if CONFIG_ESPNOW_WIFI_MODE_STATION
         #define ESPNOW_WIFI_MODE    WIFI_MODE_STA
@@ -134,8 +138,6 @@ typedef struct {
     bool broadcast;
     uint8_t state;
     uint32_t magic;
-    uint16_t count;
-    uint16_t delay;
     int len;
     uint8_t *buffer;
     uint8_t dest_mac[ESP_NOW_ETH_ALEN];
@@ -150,6 +152,7 @@ static void espnow_recv_cb(const esp_now_recv_info_t *recv_info, const uint8_t *
 int espnow_data_parse(uint8_t *data, uint16_t data_len, uint8_t *state, uint16_t *seq, int *magic);
 
 void espnow_data_prepare(espnow_send_param_t *send_param);
+void espnow_data_twai_prepare(espnow_send_param_t *send_param, twai_message_t *twai_message);
 
 static void espnow_task(void *pvParameter);
 

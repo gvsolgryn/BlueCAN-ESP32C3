@@ -26,7 +26,7 @@ void wifi_init(void) {
 }
 
 void send_callback(const uint8_t *macAddr, esp_now_send_status_t status) {
-    ESP_LOGI(TAG, "Last Packet Send Status: %s", status == ESP_NOW_SEND_SUCCESS ? "Success" : "Fail");
+    ESP_LOGI(TAG, "Last Packet Send Status: %s:", status == ESP_NOW_SEND_SUCCESS ? "Success" : "Fail");
 }
 
 void rcv_callback(const uint8_t *macAddr, const uint8_t *rcvData, int len) {
@@ -35,7 +35,7 @@ void rcv_callback(const uint8_t *macAddr, const uint8_t *rcvData, int len) {
     memcpy(&rcvMsg, rcvData, sizeof(rcvMsg));
 
     ESP_LOGI(TAG, "Received data from peer:");
-    ESP_LOGI(TAG, "Char: %s", rcvMsg.a);
+    ESP_LOGI(TAG, "Char: %s:", rcvMsg.a);
     ESP_LOGI(TAG, "Int: %d", rcvMsg.b);
     ESP_LOGI(TAG, "Float: %.2f", rcvMsg.c);
     ESP_LOGI(TAG, "Bool: %d", rcvMsg.d);
